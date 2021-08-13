@@ -1,4 +1,5 @@
-# Dissertation
+# MSc Dissertation
+## Word Segmentation in Neural Machine Translation
 Repository for all the code I used during my dissertation.
 
 * analysis.R - R code that was used to analyse the results and create the plots included in the dissertation
