@@ -1,0 +1,1191 @@
+\documentclass[11pt]{article}
+
+\usepackage[english]{babel}
+\usepackage{natbib}
+\usepackage{graphicx}
+\usepackage{setspace}
+\usepackage{listings}
+\usepackage{color} 
+\usepackage{listings} 
+\usepackage{setspace} 
+\usepackage{rotating}
+\usepackage{tikz}
+\usepackage{adjustbox}
+ 
+\usepackage{listings}
+\usepackage{color}
+
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{gray}{rgb}{0.5,0.5,0.5}
+\definecolor{mauve}{rgb}{0.58,0,0.82}
+
+\lstset{frame=tb,
+  language=Python,
+  aboveskip=3mm,
+  belowskip=3mm,
+  showstringspaces=false,
+  columns=flexible,
+  basicstyle={\small\ttfamily},
+  numbers=none,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue},
+  commentstyle=\color{dkgreen},
+  stringstyle=\color{mauve},
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=3
+}
+ 
+\linespread{1}
+
+% Set page size and margins
+% Replace `letterpaper' with`a4paper' for UK/EU standard size
+\usepackage[a4paper, top=2cm, bottom=2cm, left=3cm, right=3cm, marginparwidth=1.75cm]{geometry}
+\setlength{\parindent}{0pt}
+
+% Useful packages
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage[colorlinks=true, allcolors=blue]{hyperref}
+
+\title{Word Segmentation in Neural Machine Translation}
+\author{Alexander Curtis}
+
+\begin{document}
+\begin{titlepage}
+\begin{center}
+    \begin{figure}[h]
+    \centering
+    \includegraphics[width=7cm]{crest.png}
+    \end{figure}
+    \textsc{School of Mathematics and Statistics} \\
+    \textsc{\textbf{MT5099} Dissertation for MSc Programme/s} \\
+    \vspace{1cm}
+    \huge{\textbf{Word Segmentation in Neural Machine Translation}} \\
+    %Word Segmentation in Neural Machine Translation
+    %Resolving the Lack of Data Problem via Word Segmentation for Neural Machine Translation
+    \vspace{1cm}
+    \normalsize
+    \textit{Author:} \\
+    \textsc{Alexander Curtis (ID: 200030711)} \\
+    \textit{Supervisor:} \\
+    \textsc{Dr. Steve Drasco} \\
+    \vspace{3cm}
+    \end{center}
+    I hereby certify that this dissertation, which is approximately ten thousand words in length, has been composed by me, that it is the record of work carried out by me and that it has not been submitted in any previous application for a degree. This project was conducted by me at the University of St Andrews from June 2021 to August 2021 towards fulfilment of the requirements of the University of St Andrews for the degree of \textsc{MSc Applied Statistics and Datamining} under the supervision of Dr. Steve Drasco. \\
+    \\
+    \\
+    \\
+    \vspace{1cm}
+    \includegraphics[width=5cm]{signature.png} \\
+    \vspace{1cm}
+    \textsc{17th August 2021}
+\end{titlepage}
+
+
+\newpage
+
+\pagenumbering{roman}
+
+\begin{abstract}
+I compare three different methods for pre-processing training data by segmenting words into subwords or morphemes (e.g. \textit{hyperventilate} into \textit{hyper} $+$ \textit{ventilate}). The aim is to create a richer vocabulary from which to train a machine translation model, which would result in better performance. The first is a novel method that searches for pre-programmed morphemes and separates them from the word. The second and third are existing unsupervised methods using a byte-pair encoding approach and a cost-based approach respectively.
+%The three methods are (1) a novel manual splitting method that was pre-programmed to find certain morphemes and separate them from the word; (2) the byte-pair encoding method proposed by Sennrich et al. \citeyearpar{sennrich-etal-2016-neural}; and (3) the morpheme-finding algorithm proposed by Creutz and Lagus \citeyearpar{creutz-lagus-2002-unsupervised}, implemented via Morfessor. 
+Training data over a wide range of sizes -- from 25,000 sentences to 800,000 sentences -- sampled from a French-English corpus were used to test the methods by pre-processing them with each of the methods and then building a neural machine translation model with the resulting corpora. Each model was then evaluated by calculating a BLEU score -- an accuracy metric ranging from 0 to 1 -- on a test set to compare the relative performances of each method. 
+
+\bigskip
+
+The main finding of this study is that all three methods work best over a certain size of training data. The byte-pair encoding method is best for small amounts of data, the manual method works best for large amounts of training data, while the cost-based method performs well over all ranges tested. At each size of training data, at least one method always outperformed the unsegmented data with the increase in BLEU score ranging from 0.25\% to 1.07\%.
+%At no point do the unsegmented data produce the best model highlighting the effectiveness of these methods. Future research may be required to confirm these relationships and to explore how the three methods respond to different language pairs with more morphological variation.
+\end{abstract}
+
+\newpage
+
+\tableofcontents
+
+\newpage
+
+\pagenumbering{arabic}
+
+\section{Introduction}
+
+Machine translation -- the use of computers to translate text from one language to another -- is a topic that has been researched since the 1950s. However, its promises of fast and fluent automatic translation have so far eluded even the most high-end models that researchers have been able to build. But since 2010, the implementation of neural techniques in the field has given rise to the idea that these aspirations may indeed be met one day. Gone are the days where machine translation can only be used as a tool to aid translators, or translate user manuals without caring about how fluent the output is. Models are now being developed that can convert deep semantic meaning into another language at a near human expert level. Despite this burgeoning success, there are still obstacles left to tackle.
+
+\bigskip
+
+One of the most pressing problems is the lack of parallel source text -- two pieces of writing that are written in two different languages, carrying the same meaning sentence-by-sentence -- available to train models. This is particularly problematic in less spoken languages such as Scottish Gaelic and Irish \citep{gaelic}, but is also a problem with uncommon language pairs such as Hindi\textendash Italian. Aside from simply finding more data, there is no easy solution to obtaining a dataset with enough training examples on which to train a good translation model. Gispert and Mariño \citeyearpar{catalan} used Spanish as a bridge language between English and Catalan. And while this worked well, it is not a viable option for all language pairs simply due to a lack of source text. 
+
+\bigskip
+
+One motivation for doing this is that many of the languages with small amounts of parallel text available are at risk of becoming extinct. For years, minority languages -- such as Scottish Gaelic and Irish -- have been disappearing at an alarming rate \citep{ostler1999disappearing} and despite recent revitalisation efforts \citep{gaelic-language-plan, irish-language-plan}, the trend does not appear to be slowing \citep{thomason2015endangered}. It may be that through creation of more reliable machine translation models without the need for large amounts of training data, such languages can be made more accessible to a younger audience and help keep them and their cultures alive.
+
+\bigskip
+
+The aim of this paper is, therefore, to study, across a range of sizes of training data, three different methods for improving upon the current neural machine translation framework (mainly consisting of encoder-decoder and self-attention models) so that they may be used in situations like the one described above where there is not a natural abundance of source text. These methods all take the form of pre-processing of the source language corpus. The target language -- English in the case of this paper -- is left alone to ensure a fluent output since some of the pre-processing functions do not have a well-defined inverse function. Two of the methods are based on existing algorithms suggested by Creutz \& Lagus \citeyearpar{creutz-lagus-2002-unsupervised} and Sennrich et al. \citeyearpar{sennrich-etal-2016-neural}. The other is a novel method that, if successful, will be easy to implement for a range of languages without the need for complex algorithms, nor a particularly deep knowledge of the source language.
+
+\bigskip
+
+This dissertation commences with a literature review which provides the reader with a background to the research and development of machine translation, and gives a brief description of the mathematics and machinery behind it. Topics specific to this research area are also addressed, including an introduction to the linguistic theory underpinning it as well as previous research that has been done towards it, and the existing methods adopted for this analysis. Following this, the methodology section describes the process that was followed to implement the three segmentation methods and obtain the results of this paper. This section is supplemented by the code in Appendix A, should the reader wish to recreate the study to obtain the same results. Finally, the paper finishes with the results and discussion sections which present the findings of the research, address what they mean in a wider context, comment on the limitations of this study, and make suggestions of improvements for any future research.
+
+\bigskip
+
+This paper assumes that the reader has the knowledge equivalent to an undergraduate degree in mathematics or statistics, and has a good understanding of machine learning techniques and artificial neural networks.
+
+\section{Literature Review}
+
+\subsection{Early Development of Machine Translation}
+Machine translation (MT) has gone through many periods of breakthrough and stagnation in its short history \cite[p. 30]{koehn2020}. Taking inspiration from the code breaking success of World War II, Warren Weaver -- one of the early pioneers of machine translation -- mused whether “translation could be treated as a problem in cryptography” \citeyearpar{weaver}. The Georgetown experiment in 1954 brought great hope to that claim by successfully translating Russian sentences into English using just 250 words and 6 preprogrammed grammar rules \citep{Hutchins2006TheFP} -- a method now known as rule-based machine translation (RBMT). Progress with this method was quickly halted, however, when the ALPAC report \citeyearpar{alpac} deemed that “there is no immediate or predictable prospect of useful machine translation” and that funding should instead be directed towards improving the availability of human translators. 
+
+\bigskip
+
+Research into MT then went through a long lull where, despite systems such as Systran (1968), Logos (1972) and Météo (1976) -- all of which used RBMT approaches -- showing occasional promise in specific domains, very little progress was made to build on the early hype. This all changed with the advent of data-driven methods in the late 1980s. Up until this point, programs had been built by painstakingly codifying languages using these rule-based methods and complex grammars, and required the knowledge and understanding of linguistic experts. Now, with the availability of computing power and data storage rapidly expanding, it was possible to train computers to learn these rules themselves by feeding them data in the form of parallel corpora\footnote{A parallel corpus is a text that is produced in two different languages and carries the same meaning sentence-by-sentence.}. Brown et al. \citeyearpar{brown-etal-1990-statistical} were the first to capitalise on this -- suggesting using data and statistics in machine translation to frame it as a statistical optimisation problem. This went on to launch the field of statistical machine translation (SMT).
+
+\subsection{Statistical Machine Translation}
+
+This data-driven approach was the fundamental idea behind statistical machine translation. IBM were the early pioneers in the field with their models 1\textendash 5 (described by Brown et al. \citeyearpar{brown-etal-1993-mathematics}). These were so-called word-based models that used statistical optimisation to model translation by looking at sentences word-by-word. The first model -- IBM Model 1 -- worked by calculating probabilities for sentence translations using two notions:
+
+\begin{itemize}
+\item \textbf{Lexical translation probabilities}: $t(e \mid f)$. This is an estimate for the probability that a foreign word \textit{f} is translated into an English word \textit{e}.
+\item \textbf{Alignments functions}: $a(\cdot)$. These allow words to be ordered differently depending on the rules of the language pair. For example, in English\textendash French the noun and adjectives are normally the opposite way round, so in the translation of \textit{red cat} $\mapsto$ \textit{chat rouge}, there would be an alignment function of \textit{a} : \{1 $\mapsto$ 2, 2 $\mapsto$ 1\}. For many language pairs this may be much more complicated.
+\end{itemize}
+
+These two concepts were combined to form equation (1) below, where the left hand side is the probability of an English sentence, \textit{\textbf{e}}, and alignment function, \textit{a}, given a foreign sentence, \textit{\textbf{f}}. The bold font is used here to signify that these sentences are vectors made up of individual word tokens. $l_f$ and $l_e$ are the lengths of the foreign and English sentences respectively, while $\epsilon$ is a regularisation parameter to ensure that $P$, defined below, is a probability distribution (i.e. that all possible events sum to 1).
+
+\begin{align}
+    P(\textit{\textbf{e}}, \textit{a} \mid \textit{\textbf{f}}) = \frac{\epsilon}{(l_f+1)^{l_e}} \prod_{i = 1}^{l_e} t(e_i \mid f_{a(i)})
+\end{align}
+
+The translation probabilities were calculated by using the expectation-maximisation algorithm to find which foreign words correspond to which English words \citep[p. 89]{koehn2010}. This works by initialising with a uniform distribution for each translation and, due to the different frequencies of each word, it gradually converging to the correct correspondence through repeated iteration of updating the distributions. Once these correspondences have been found, the probabilities were estimated using maximum likelihood by simply counting the number of times a word \textit{f} is translated as word \textit{e}, and dividing by the total number of occurrences of that word.
+
+\begin{align}
+t(e \mid f) = \frac{\textrm{count}(e, f)}{\sum_{e_i} \textrm{count}(e_i, f)}
+\end{align}
+
+The progress of the algorithm could be tracked by using the perplexity measure, \textit{PP}, defined below in equation (3). As the model converges on the optimal probabilities, the perplexity decreases down to a global minimum.
+
+\begin{align}
+    \log_2(PP) = - \sum_s \log_2 P( \textbf{e}_s \mid \textbf{f}_s )
+    \label{perplexity}
+\end{align}
+
+Later IBM models built on this basic model by adding a more explicit model for alignment (rather than giving all alignments equal weight as IBM Model 1 did), adding a fertility model (that is, adding the possibility that one foreign word may be translated as many English words), and further refinement of the alignment function. The next big step in SMT was with the introduction of phrase-based models proposed by Koehn et al. \citeyearpar{koehn-etal-2003-statistical}.
+
+\bigskip
+
+The idea behind phrase-based models was that often words do not map directly to another word. Instead, groups of words (which here are used to define a phrase) could be taken as a single atomic unit and mapped to another group of words. This had the added benefit of simplifying the model by removing the notion of fertility and word deletion (which the later IBM models had relied upon), while also resolving translation ambiguities and making the language flow more naturally. Reordering was also now handled using a distance-based metric to discourage translations from being too shuffled compared to the input. Matching phrases were found by looping over all possible English phrases and finding the smallest foreign phrase that matched them. This resulted in many phrases of different lengths which were not mutually exclusive, but meant there were many options available for translation. The probability, \textit{P}, of each phrase was again calculated using maximum likelihood exactly as described before, but simply replacing word tokens with phrases.
+
+\bigskip
+
+Another notable addition to machine translation was the language model described by Koehn \citeyearpar[ch. 7]{koehn2010}. Language models aimed to add fluency to a translation sentence by assigning a probability based on how likely a word order is to appear. This probability was then multiplied by the translation probability so that both fluency and accuracy were taken into account. Language models took the form of an \textit{N}-gram, which used the Markov assumption (see equation (4)) to reduce the importance of the words preceding the current word to only the last $N-1$. More common N-grams equate to more fluent word orders and so are assigned a high probability which will make the chosen translation more fluent. The probabilities of \textit{N}-grams are calculated in a similar way to translation probabilities -- according to their relative frequency. This is described by equation (5), where $w_i$ represents word $i$.
+
+\begin{align}
+    P(w_n \mid w_1, w_2, \dots, w_{n-1}) \approx P(w_n \mid w_{n-m}, \dots, w_{n-2}, w_{n-1})
+\end{align}
+\begin{align}
+    P(w_3 \mid w_1, w_2) = \frac{\textrm{count}(w_1, w_2, w_3)}{\sum_w \textrm{count}(w_1, w_2, w)}
+\end{align}
+
+\bigskip
+
+Larger values of \textit{N} could be used to attain higher levels of fluency from the language model. However, this came at a cost. As the sequence of words being searched for grows, the probability that it is seen in a training corpus decreases, resulting in many particular \textit{N}-grams being assigned a probability of zero. This would then have a drastic effect on any associated calculation, since the probability would be zero regardless of the translation probability. There were two ways around this. The first was simply to obtain a larger training corpus so that it is less likely that zero count \textit{N}-grams appear or play an important role. The second (and more complicated) method was to use smoothing and back-off methods. The details of these concepts are beyond the scope of this dissertation, but the concept of a back-off is an important one that will be revisited later on.
+
+\bigskip
+
+Once the sentence translation probabilities had all been calculated, the goal was to then find which sentence had the maximum probability -- a task called decoding. This was not an easy task since there were potentially three models (translation, language, and reordering) to keep track of. In fact, there is an exponential number of choices in the sentence length, rendering the problem NP-complete \citep{knight-1999-decoding}. There were many ways of finding the best translation whilst reducing the computational burden but the most popular method was beam search \citep[ch. 6]{koehn2010}. Beam search worked by following the best partial translation path (called a hypothesis) word-for-word while also retaining the next \textit{k} best hypotheses. This ensured it kept the flexibility that is required by the translation and alignment models while reducing the complexity to roughly quadratic. Beam search has been shown to produce faster and better results than alternative methods for both word-based and phrase-based SMT models \citep{koehn2004pharaoh, och2002statistical}.
+
+\bigskip
+
+Despite reaching commercial levels of quality, many sceptics believed machine translation had plateaued towards the end of the noughties \citep[p. 39]{koehn2020}. This was all to change, however, with the advent of neural machine translation (NMT). 
+
+\subsection{Neural Machine Translation}
+
+With the rapid development of graphical processing units (GPUs) in the early 2000s, artificial neural networks (ANNs) began to re-emerge as a viable machine learning technique. Work was quickly directed into seeing how ANNs could be used in the area of machine translation. Early promise was shown in research from Schwenk \citeyearpar{schwenk} in using them as part of public evaluation campaigns, while others started implementing neural techniques within the already existing SMT infrastructure. The first purely neural machine translation structure was proposed by Kalchbrenner and Blunsom \citeyearpar{kalchbrenner-blunsom-2013-recurrent-continuous}, using an end-to-end encoder-decoder design (explained below). Within a few years, almost all research in machine translation was directed into neural methods. In 2016, Google developed their own machine translation method \citep{wu2016googles} and switched Google Translate from working via phrase-based methods to their new neural method \citep{googleblog}. By the 2017 Workshop on Machine Translation (WMT), all models submitted were using neural machine translation systems \citep[p. 40]{koehn2020}.
+
+\bigskip
+
+As Koehn \citeyearpar[ch. 8]{koehn2020} describes it, a basic neural machine translation model currently contains three components: An encoder, a decoder and an attention mechanism.
+
+\bigskip
+
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\textwidth]{Encoder.png}
+    \caption{Computation graph describing the architecture of a basic NMT input encoder and the process it follows when presented with a source sentence \textit{the house is big.} \citep[p. 127]{koehn2020}.}
+    \label{fig:encoder}
+\end{figure}
+
+The job of the \textbf{encoder} is to find a representation of the input sentence. Given a vocabulary of $n$ words, the first part of this is to represent each word via an $n \times 1$ one-hot vector. This is a vector where all values are 0 except for one 1 which is used to represent each unique word. Using this one-hot vector, the encoder next creates an $m$-dimensional ($m \leq n$) embedding space to represent each word's meaning. This is done in a very similar way to language models in SMT -- by using the history of a word to determine its use and semantic meaning. Once all words have been processed into an embedding space, the final step is to process these words in a recurrent neural network\footnote{A recurrent neural network is a class of neural network where connections are made between nodes through time to create a temporal sequence that builds on itself using past networks.} (RNN) to obtain a representation of the sentence. Often bi-directional RNNs are used that analyse context coming from both the left and the right of the sentence to ensure the sentence meaning is represented adequately.
+
+
+\bigskip
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width = 8cm]{Decoder.png}
+    \caption{Computation graph describing the architecture of a basic NMT output decoder and the process it follows to make translation predictions when given a word context \citep[p. 128]{koehn2020}.}
+    \label{fig:decoder}
+\end{figure}
+
+The \textbf{decoder} takes the representation of the input sentence and, using a hidden layer, generates an output word prediction. Each output word is then processed into a new embedding space and this word embedding is fed back into the hidden layer to form a recurrent neural network. The RNN is used to ensure output words are generated using the context of the sentence and so is essentially replacing the role of the language model used in SMT. To ensure the possibility of multiple output words, a softmax activation function is used to convert results from the hidden layer into a probability distribution.
+
+\bigskip
+
+These two neural networks are then joined together by the \textbf{attention} model. Attention models look at word order and, as such, are somewhat comparable to the alignment models often seen in SMT models. The encoder produces a sequence of word representations while the decoder requires a word context at each step. The attention model’s job is to bridge this gap. This is essentially done by calculating weights based on the decoder state (and where in the sentence each word is), and each input word. These weights signify how strong the association is between each input word and the next output word.
+
+\bigskip
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width = 14cm]{Attention.png}
+    \caption{Computation graph describing the architecture of a basic NMT attention model and the process it follows to convert a sequence of word representations into a sentence context \citep[p. 130]{koehn2020}.}
+    \label{fig:attention}
+\end{figure}
+
+\bigskip
+
+These models are trained in much the same way as standard neural networks are trained. Given some parallel training data, a training method such as back-propagation\footnote{Back-propagation is a training algorithm for neural networks that works by computing the gradient of the loss function with respect to each weight using the chain rule. Gradients are computed layer-by-layer, iterating backwards.} along with gradient descent is used to cycle through epochs of data with the goal of reducing the error -- normally in the form of perplexity (described above in equation (\ref{perplexity})). %Different learning rates are also often used and can be adapted using optimisers such as Adagrad or Adam.
+To prevent overfitting, a validation set of a few thousand sentences may be used alongside an early stopping rule. Without this, the perplexity would continue to decrease down to a global minimum and predict the training set extremely well but not generalise to new data. This is particularly a problem with small training sets as they are less likely to be representative of new data. Models are generally trained using GPUs due to their fast training times and ability to allow for parallelisation. 
+
+\bigskip
+
+The Transformer model proposed by Vaswani et al. \citeyearpar{vaswani2017attention} makes great use of parallelisation. This model modifies the encoder-decoder structure described above by replacing both with multiple self-attention layers. While an attention layer is used to compute the association between an input and an output word, a self-attention layer is finding the association between two input words. This allows for a wider context of each word compared to the traditional encoder/decoder and also speeds up the process by not requiring the model to go through data word-by-word. As well as impressively reducing training times and allowing for more parallelisation, this design has also been shown to significantly out-perform previous state-of-the-art models, such as the encoder-decoder structure described above.
+
+\bigskip
+
+For NMT, the act of finding the translation with the highest probability -- decoding -- is very similar to in SMT. The most popular method is again beam search, which works almost identically to how it was described in the previous section \citep[ch. 9]{koehn2020}. The main difference comes in that there is not an explicitly defined language model or alignment model since these are integrated in the model via attention layers and embeddings. This makes it even more crucial that several hypotheses are kept open so as to avoid the so-called ‘garden-path problem’ where a sequence of words is followed only to find it is not the best one.
+
+\subsection{Evaluating Machine Translation}
+
+Once a model has been trained and translation predictions have been made, there needs to be some way to evaluate its performance. Given the complex nature of translating between languages, the most ideal way to do this would be using bilingual people to compare the translation with the source text. In the early days of machine translation, this is exactly what was done \citep{white-etal-1994-arpa}, although also monolingual evaluators were sometimes used along with reference translations, particularly if there were not many bilingual speakers available. Evaluators would score texts out of five on their fluency (how well the text reads, regardless of translation) and adequacy (how well the translation captures the meaning of the text). These scores were then normalised (to avoid some evaluators systematically scoring high or low scores) and combined (e.g. into an $F_1$ score). This method was the gold-standard for many years, but was naturally quite expensive to compute and did not scale well. For this reason, an automatic evaluation method was required.
+
+\bigskip
+
+One of the first automatic evaluation methods that was shown to have a high correlation with human judgements was the bilingual evaluation understudy (BLEU) score proposed by Papineni et al. \citeyearpar{papineni-etal-2002-bleu}. BLEU is underpinned by the idea that “the closer a machine translation is to a professional human translation, the better it is” \citep[p. 311]{papineni-etal-2002-bleu}. At its core, BLEU is essentially a precision metric; it rewards correct word order by matching \textit{N}-grams (i.e several words in a row) to the reference text. The problem with precision metrics, however, is that it is often possible to game them by simply producing no output for difficult words and thus avoid making `wrong' predictions. BLEU overcomes this by introducing a ‘brevity penalty’ which kicks in if the machine translation is too short. BLEU is defined by the following equations:
+
+\begin{align}
+    \textrm{BLEU} = (\textrm{brevity penalty}) \times \exp \bigg( \sum_{i=1}^4 \frac{\textrm{matching \textit{i}-grams}}{\textrm{total \textit{i}-grams in machine translation}} \bigg)
+\end{align}
+\begin{align}
+    (\textrm{brevity penalty}) = \min\bigg(1, \frac{\textrm{output length}}{\textrm{reference length}}\bigg)
+\end{align}
+
+Despite being the most widely used evaluation metric \citep[ch. 4]{koehn2020}, using BLEU still comes with many drawbacks. Most notably, Turian et al. \citeyearpar{turian2006evaluation} found that BLEU did not correlate well with human evaluation, especially compared to other automatic evaluation options. Some of the other more significant problems with BLEU are its lack of interpretability, its failure to reward near matches, and it allowing too much variation \citep{ananthakrishnan2007some}. Various other metrics have been proposed to solve these problems such as translation edit rate (TER), METEOR, and characTER but most are yet to be widely adopted and are often just used alongside BLEU scores.
+
+\bigskip
+
+The main criticism of pretty much all automatic evaluation methods, however, is that they struggle to account for a sentence being translated in multiple different ways. This is particularly a problem when languages are very different, and word order can be more flexible. For example, the two sentences \textit{“Israel is in charge of the security at this airport”} and \textit{“The security work for this airport is the responsibility of the Israel government”} are both valid translations of a Chinese sentence from the 2001 NIST evaluation set \citep{koehn2011better}, but would only achieve a BLEU score of around 10\% if one were the reference translation for the other. This problem can be mitigated by including multiple reference sentences when calculating evaluation metrics but in practice, most parallel corpora only include one translation and producing more would be an expensive task.
+
+\subsection{Sparse Data}
+
+It is well-known that high-dimensional, sparse data can cause a lot of problems for machine learning models \citep{sparse}, and neural networks are of course no different. Unfortunately, when creating a neural machine translation model, the data take the form of multiple \textit{m}-dimensional one-hot vectors, where \textit{m} is very large (normally in the tens of thousands). This is then exacerbated by the fact that many rare words will only occur once in even a large training corpus. This phenomenon is what is predicted by Zipf’s law, which states that the rank of a word is inversely proportional to its frequency. That is to say that the frequency of a word multiplied by its rank of how often it occurs is roughly constant. This is visualised in the plot below of the ranks and frequencies of English words in a sample from the Europarl corpus \citep{koehn2005europarl}.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width = 12cm]{Zipf_r.png}
+    \caption{Plot of the frequency of words in a sample from the Europarl English corpus against their respective ranks on a log-log scale (created using \texttt{ggplot} \citep{ggplot}). Note how the points roughly follow a constant slope of 1. This is explained by equation (8) below where \textit{f} and \textit{r} are frequency and rank respectively, and \textit{k} is a constant.}
+    \label{fig:my_label}
+\end{figure}
+
+\begin{align}
+    f \times r = k \nonumber
+\end{align}
+\begin{align}    
+    f = \frac{k}{r}
+\end{align}
+\begin{align}
+    \log(f) = \log(k) - \log(r) \nonumber
+\end{align}
+
+\bigskip
+
+In the context of machine translation, Zipf’s law means that there may only be one example of a word’s translation despite it potentially having many more meanings. For example, if the French verb \textit{arrivons} only occurs once in the training corpus and is translated as \textit{arrive}, then it will probably be translated as arrive in all future occurrences. Despite this, \textit{arrivons} could also be translated as \textit{reach} or \textit{are able to} in different contexts. Of course, a language model could also contribute by analysing the surrounding words in the sentence, but if it has never seen another translation before, no weight will be assigned regardless. This is what is observed by Johnson and Khoshgoftaar \citeyearpar{johnson2019survey} where they note that infrequent classes are poorly recalled when there is some kind of frequency-based bias in the data. If a word is so uncommon that it does not appear in the training corpus, then it will be almost impossible to translate.
+
+\bigskip
+
+Research from Gowda and May \citeyearpar{gowda-may-2020-finding} shows that overly large and sparse vocabularies will have a detrimental effect on the performance of a translation system. They recommend using a vocabulary size such that 95\% of words have at least 100 examples in training. This is where analysing the word's morphology and breaking words into morphemes or subwords can help achieve a more richly populated vocabulary.
+
+\subsection{Morphology, Morphemes and Subwords}
+
+In English, verbs and nouns are relatively simple. For the third person form (i.e. \textit{he/she/it}), most verbs simply add an -\textit{s} (\textit{I play} $\to$ \textit{he plays}), while the same thing is repeated for making nouns plural (\textit{cat} $\to$ \textit{cats}). This is pretty much the limit of morphological variation that exists in English, but that is not the case in all languages. In French for example, verbs are conjugated in up six different ways in the present tense:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lllll}
+I play — Je joue    & We play — Nous jouons           \\
+You play — Tu joues & You (plural) play — Vous jouez  \\
+He plays — Il joue  & They play — Ils jouent          \\
+\end{tabular}
+\caption{Conjugation of the French verb \textit{jouer} to demonstrate how different languages follow alternative morphological structures to English.}
+\label{table:conjugation}
+
+\end{table}
+
+\bigskip
+
+This kind of variation can also be seen in adjectives and even in nouns in languages such as German and Greek. Depending on the gender of the noun and its role in the sentence (its case), adjectives can take multiple different forms while carrying an almost identical meaning. This variation and composition of words is what is called a word's morphology. For the French example above, a suffix is added to the end of the root \textit{jou-} so that the verb ending agrees with the personal pronoun (i.e. who is performing the verb). 
+
+\bigskip
+
+Machine translation is able to take advantage of this by breaking down words into their different morphological components, called morphemes. Revisiting the example above, if the verb \textit{arrivons} is broken down into \textit{arriv} + \textit{ons}, there will suddenly be a lot more training data from which translation and language probabilities (in the case of SMT), or correct embeddings (in the case of NMT) can be calculated. This should allow for the machine translation to arrive at the correct translation significantly more often.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll|l|l|}
+\cline{4-5}
+                                           &                            &  & \textit{arriv}- translation & Count \\ \cline{1-2} \cline{4-5} 
+\multicolumn{1}{|l|}{\textit{arrivons} translation} & \multicolumn{1}{l|}{Count} &  & arrive             & 98    \\ \cline{1-2} \cline{4-5} 
+\multicolumn{1}{|l|}{are able to}          & \multicolumn{1}{l|}{1}     &  & able to            & 7     \\ \cline{1-2} \cline{4-5} 
+                                           &                            &  & happen             & 1     \\ \cline{4-5} 
+\end{tabular}
+\caption{Hypothetical word counts for example above to illustrate how splitting up words based on their morphology can achieve a richer vocabulary.}
+\label{table:count-ex}
+\end{table}
+
+\bigskip
+
+This was the idea behind the algorithm suggested by Creutz and Lagus \citeyearpar{creutz-lagus-2002-unsupervised}. Their algorithm is an unsupervised method for discovering morphemes, that can be implemented using the exact same training data that is used for training an MT model. It works by initially splitting up all words according to the length of the word using a Poisson distribution with $\lambda = 5.5$. Probabilities for these splits are then calculated using maximum likelihood (exactly as described for SMT). With these probabilities, the Viterbi algorithm\footnote{The Viterbi algorithm is an algorithm for finding the value that maximises probability from a sequence of observed events.} is used to re-segment the text to minimise the cost function for each word, described below in equation (9). These segmentations are then evaluated against some rejection criteria to ensure that the split is not too rare (since that likely means it is false) or that it is does not contain too many one letter morphemes (as this was found to lead to local optima).
+
+\begin{align}
+    \textrm{Cost}(\textrm{Source text}) = \sum_{\textrm{morph tokens}} -\log(P(m_i))
+\label{Morfessor-cost}
+\end{align}
+
+\bigskip
+
+Creutz and Lagus suggest use of their algorithm for particularly morphologically rich languages, such as Finnish, but believe it may be beneficial for all languages. Mermer et al. \citeyearpar{mermer2010tubitak} implemented this methodology for performing a statistical machine translation from Turkish (another morphologically complex language) to English and achieved promising results -- improving the BLEU score by more than 5\% compared to the baseline.
+
+\bigskip
+
+Another way words can be broken down is into their subwords. Many languages, such as German, are famous for combining multiple nouns together to make one long compound noun. For example, the German word \textit{kinderbuch} translates into English as \textit{children’s book}. It is made out of two subwords: \textit{kinder} (\textit{children}) + \textit{buch} (\textit{book}). The problem for machine translation is that these long compound words may not come up in training and so will be impossible to predict without using some additional method. Translation of these out-of-vocabulary (OOV) words is often done using a back-off dictionary. This works by simply using (i.e. backing-off to) a bilingual dictionary to translate words with no training examples. While this can work well, it is often undesirable since dictionaries cannot be adapted according to the context of the word. Furthermore, many dictionaries will still fail to find many rare words.
+
+\bigskip
+
+The other option would be to find a way of splitting OOV words into their separate subwords. Sennrich et al. \citeyearpar{sennrich-etal-2016-neural} were able to do this taking inspiration from a compression algorithm called ‘byte pair encoding’ (BPE). This works by finding pairs of letters that are often found next to each other and merging them into a ‘subword’. This process is repeated iteratively until a satisfying number of subwords have been found. The pseudo-code in Figure 5 gives more details of how this works. Sennrich et al.'s BPE approach was shown to be a much better alternative. It improved BLEU scores by over 1\% compared to models using back-off dictionaries, and was shown to be particularly impressive at translating rare OOV words.
+
+\begin{figure}[h]
+\begin{verbatim}
+    START
+        Create a vocabulary for the training corpus
+        For word in vocabulary:
+            Add spaces between each letter
+            Add <w/> after each word
+            Calculate frequency of word in corpus
+        For i = 0 to num_merges:
+            Find where spaces separate strings most often
+            Merge these two strings
+        Create new dictionary with split words
+        Remove <w/> tokens
+        Where old dictionary != new dictionary:
+            Replace old word with split word in corpus
+        Return new corpus
+    END
+\end{verbatim}
+\caption{Pseudocode for how the BPE splitter method segments uncommon words into more common subwords.}
+\label{table:pseudocode2}
+\end{figure}
+
+\newpage
+
+\section{Methodology}
+
+\subsection{The Data}
+
+The dataset that was used for this study was the Europarl Corpus \citep{koehn2005europarl}. This is a corpus made up of the proceedings of the European Parliament in 21 parallel languages, and features over a million parallel sentences for popular language pairs such as English\textendash French and English\textendash German. The sentences have been scraped from the internet and so are naturally noisy and require some cleaning. Despite this, the Europarl corpus was selected due to the amount of flexibility offered by the size of the data. In addition to this, it has been a popular corpus in research for many years and, as such, makes drawing comparisons to other studies much easier. For the purpose of this study, the English\textendash French parallel corpus was used. This was chosen for several reasons: it is large, so it is possible to train models on large amounts of training data; it represents two different language groups (English is Germanic, French is Romanic) so they are not too similar; French is relatively familiar to English speakers which makes for easier coding and debugging.
+
+\bigskip
+
+Once the corpora were acquired, the first step was the prepare them for use. This was achieved through a series of functions created on Python 3 \citep{python3}, using the packages \texttt{random}, \texttt{re}, \texttt{string} \citep{python-random}, \texttt{NumPy} \citep{2020NumPy-Array} and \texttt{SciPy} \citep{2020SciPy-NMeth}, and based on the code supplied by Brownlee \citeyearpar{brownlee_2018}. The first functions simply read in each corpus and converted it from a long string into a list where each element was an individual sentence. The next function's purpose was to clean the data. This was done by lower-casing all words, removing unnecessary punctuation and then adding space around the necessary punctuation (apostrophes and hyphens) so that they would count as their own word tokens. The decision was made to keep these punctuation marks, rather than the others, because they are used to join words (e.g. \textit{build-up} in English and constructions in French such as \textit{appellez-moi}%meaning \textit{call me}
+), signify contractions (\textit{isn’t} in English or \textit{j’ai} in French -- a necessary contraction of \textit{je ai}% meaning \textit{I have}
+), and denote possession (\textit{John’s cat}) which makes them key to the sentence meaning while the others are not. Finally, once the corpora had been cleaned, a function was created to randomly split them into training, validation and test sets and then a function was created to save these new datasets.
+
+\bigskip
+
+With the data now cleaned, several functions were created to analyse the corpora. The first was a function that created a vocabulary by finding all the unique words in a corpus and saving them to a list. The next was the \texttt{zipf} function which was used to create the plot shown in Figure 1. The \texttt{zipf} function uses the vocabulary list to calculate the rank and frequency of each word. It was then used to create an encompassing function called \texttt{corpus\_details}. This function uses the previous two functions to output the size of the vocabulary (i.e. how many unique words are in the corpus) and, taking inspiration from Gowda and May \citeyearpar{gowda-may-2020-finding}, what the frequency is of a word at a given percentile (by default the median as opposed to the 95th percentile due to the corpora being too small for this to be anything other than 1). This function will be particularly useful in analysing the results of the different methods for word segmentation tried in this study.
+
+\subsection{Study Design}
+
+This study compares the performance of three different methods for splitting up words with the purpose of creating a richer vocabulary, with fewer words that only occur sparsely. It also evaluates the effect that this has on the performance of a neural machine translation model built using the transformed corpora.  The three methods are all detailed below. Performance for each method was evaluated across the French to English language pair and across a range of training corpus sizes (starting from 25,000 sentences and doubling in size up to 800,000 sentences) so that the methods can be compared in many different scenarios and therefore be recommended for use in several different settings.
+
+\bigskip
+
+All machine translation models for this study were trained using OpenNMT \citep{klein-etal-2017-opennmt} -- an open-source ecosystem that aids in creating, training and evaluating models for neural machine translation. All models were trained using either Nvidia Tesla P100 or V100 GPUs, hosted on Google Colaboratory and using the TensorFlow framework \citep{tensorflow2015-whitepaper}. The specific model used for all the segmentation methods was the Transformer model (described earlier in section 2.3) originally proposed by Vaswani et al. \citeyearpar{vaswani2017attention}, with a maximum vocabulary size of 50,000 word tokens. %This uses a Lazy Adam optimiser and a constant learning rate of 2.0.
+This model was chosen due to its efficiency in producing good, working models in a reasonably quick time. This was especially vital due to only having access to one GPU and Google Colab having a maximum idle time of a few hours making long training times not feasible. Each model was evaluated via perplexity (see equation (\ref{perplexity})) every one thousand steps using a validation set of 5,000 sentences, and took roughly 3\textendash6 hours to train.  Overfitting was controlled using stopping criteria that stopped training if the perplexity did not decrease by at least 0.5 for three consecutive evaluations. Once the algorithm had stopped training, a weighted average was taken of the last three checkpoints and this model was then saved.
+
+\bigskip
+
+Once each model had been trained, predictions were made on a test set of 2,000 sentences using OpenNMT’s \texttt{infer} function. A beam search with a beam width of $k = 4$ was used to find the best translation as efficiently as possible. With the translation predictions made, a bootstrap BLEU score distribution was calculated by randomly sampling (with replacement) 1,000 sentences from the test set 2,000 times. For each bootstrapped sample, the BLEU score was calculated using the \texttt{SacreBLEU} Python package \citep{post-2018-call} with the associated test set in English used as reference sentences. Bootstrapping was used as it allows for a measurement of uncertainty in results so that confidence intervals can be calculated to better compare the performances of two different models. As such, it is also possible to perform hypothesis tests by directly comparing the distribution of two models’ bootstrap scores. This is much more reliable than simply comparing two individual BLEU scores since it provides an error estimate so if one model happens to do well on certain test sentences but less well on others, this will be captured.
+
+\bigskip
+
+Before evaluating the scores of the different splitting methods, a baseline score was calculated for each training corpus size to act as a control. This was done by simply using the cleaned sentences (but not applying any of the splitters to them) and then following the process outlined above. The purpose of this was to have a score to compare to so that it can be judged whether using the word-splitting methods is actually beneficial to the translation and, if so, by how much.
+
+\subsection{Method 1: Manual Splitter}
+
+The first method tried for splitting words was a novel, manually-programmed splitter that segments foreign words based on common verb endings. As discussed in section 2.6, many foreign languages conjugate verbs differently using general rules; Table \ref{table:conjugation} gives an example of how this works in French. The idea behind this method is that if these verb endings can be separated from the verb stem, a richer vocabulary will be created which avoids the problems with sparse data.
+
+\bigskip
+
+This is achieved by a very basic function that is pre-programmed with the common verb endings, saved as strings. In the case of French, these verb endings were \textit{-ez, -ent, -ons, -ais, -ait, -ions, -iez, and -aient}. The decision was made to not separate out other common verb endings such as \textit{-é(es), -es, and -t} as they are generally too common (although an argument could be made the other way nevertheless). The function cycles through the corpus and searches for occurrences of these strings followed by a blank space to ensure it is at the end of a word. A space is then simply added before the string so that then the ending and the stem are separate and the machine translation will treat them as separate word tokens. For example, this approach will result in the following sentence transformation:
+
+\bigskip
+\begin{center}
+\textit{Nous détestions notre chat mais maintenant nous l ‘ adorons} \\
+\medskip
+$\downarrow$ \\
+\medskip
+\textit{Nous détest ions notre chat m ais maintenant nous l ‘ ador ons}
+\end{center}
+\bigskip
+
+This example highlights the potential problem of this method’s simplicity. While it sometimes works perfectly, other times it is also very crude. The two verbs in the example -- \textit{détestions} and \textit{adorons} -- have been split as desired but the word \textit{mais} -- meaning \textit{but} -- has also been split. \textit{Mais} is a very common French word so splitting it up not only makes no sense morphologically speaking, but it will almost certainly confuse the translation process also. This issue is exactly what the next approach attempts to fix.
+
+\subsection{Method 2: BPE Splitter}
+
+The next method was the method proposed in the research done by Sennrich et al. \citeyearpar{sennrich-etal-2016-neural} in generating subwords, and used the associated code provided. First, all unique words found in the corpus are compiled into a dictionary. These words are then separated out into letters and an end-of-word token ($<$w/$>$) is placed at the end of each word. The letters and tokens are then merged iteratively based on how frequently they occur next to each other. A new dictionary is then created, with some words left as they were before, but some words having been split up. This new dictionary is then applied to the training, validation and test sets to create new, segmented corpora. A pseudo-code of how this process works in more detail can be found earlier in Figure \ref{table:pseudocode2}.
+
+\bigskip
+
+As discussed in section 2.6, the idea behind this is that letters that often occur together form ‘subwords’ that should be more easily translated than compound words. The purpose of the end-of-word token is so that suffixes (a morpheme added to the end of a word, e.g. \textit{-ment} in \textit{endorsement}) can also be found and separated. A start of word token could also be considered to look for prefixes (morpheme added to the beginning of a word), but this was not done by Sennrich et al. and so is omitted here too.
+
+\bigskip
+
+This is an unsupervised method and the only hyperparameter is the number of merges that occurs between letters. Sennrich et al. \citeyearpar{sennrich-etal-2016-neural} calculated this number by setting a fixed size for the vocabulary (i.e. how many word tokens) and merging until this number was reached. For the purposes of this study this was not practical since a wide range of corpus sizes were being tested and so finding the optimum vocabulary size for each would have been too computationally expensive. Instead, the number of merges was set to be $0.575$ multiplied by the size of the corpus’ vocabulary. While not particularly scientific, this was shown to work well in preliminary experiments and will suffice as a lower-bound of how well this method can work.
+
+\bigskip
+
+The main drawback of this method is that it may unjustly split up uncommon words, and that it particularly struggles with `loanwords' (foreign words that are adopted into a language) and names (although these are often not translated well in any case). This is simply due to the fact that it is a frequency-based approach so if there is an unusual loanword -- such as \textit{déjà vu} in English -- it will likely be split up due to the rarity of the character combinations in the rest of that language. This randomness was something the next method looked to solve.
+
+\subsection{Method 3: Morfessor}
+
+The final approach was the Morfessor approach, which utilised the algorithm proposed by Creutz and Lagus \citeyearpar{creutz-lagus-2002-unsupervised} described in section 2.6. Morfessor \citep{virpioja2013morfessor} is an open-source package that contains a family of unsupervised and semi-supervised segmentation algorithms and allows for an easy implementation of them via Python. As already discussed, the algorithm used for this method is a completely unsupervised method that aims to find morphemes (morphologically-grounded subwords) recursively via the cost function described in equation (\ref{Morfessor-cost}).
+
+\bigskip
+
+The cost function is the main distinguishing feature between this method and the BPE splitter described above. In theory, the Morfessor algorithm is able to learn the morphology of a language via the training set and apply it to make splits only in places where it is required. What this means is that there is no hyperparameter to tune with this method and so the results seen should be optimal (which is not the case with the BPE method). This learning approach also lends the Morfessor algorithm well to how it reacts to new data, since it can apply what it has learned on the training data, much like the BPE method can too. 
+%For the BPE method, new data can only be split based on some pre-selected number of merges. However, there is no guarantee that the segmentation will align well with the segmentation that was done to the training data, especially if the new data is not representative of previously seen data. Morfessor is a trained algorithm so it should be able to segment new data much more similarly, making translation significantly easier.
+
+\bigskip
+
+In this study, the Creutz and Lagus algortihm was implemented using Morfessor by training on the training data. Once the Morfessor model had been trained, it was then used to segment the training corpus, the validation corpus and the test corpus. These corpora were then used to train an NMT model and test it as described above, using the test corpus to obtain a bootstrap BLEU score distribution.
+
+\newpage
+
+\section{Results}
+
+The results of the baseline translation models are displayed below in Table 3. Generally, the BLEU scores progress in the same way that Koehn describes occurs with SMT -- ``doubling the amount of training data typically gives a fixed increase in BLEU scores'' \citep[p. 295]{koehn2020}. Every doubling here caused an increase of roughly 3-4\% in BLEU, and any deviation from this is largely explained by the variance. The bootstrap variances also followed a very similar pattern, with a reasonably steady increase between training sizes doubling. All variances were sufficiently low enough that it can be said that each model is better than the previous with a great deal of confidence. Vocabulary size grew at a somewhat more rapid pace, with the difference between training size doublings growing each time. Despite this, the median word frequency remained constant at two throughout.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+Training Size & BLEU Mean & BLEU Var. & Vocab. Size & Median Freq. \\ \hline
+25,000             & 28.679    & 0.136         & 24633           & 2                     \\
+50,000             & 32.493    & 0.145         & 32952           & 2                     \\
+100,000            & 37.050    & 0.164         & 43547           & 2                     \\
+200,000            & 39.664    & 0.184         & 57088           & 2                     \\
+400,000            & 41.494    & 0.186         & 74913           & 2                     \\
+800,000            & 44.651    & 0.197         & 98626           & 2                     \\ \hline
+\end{tabular}
+\caption{Baseline results for the translation models. BLEU mean and BLEU variance are taken from a bootstrap distribution and are given as percentages, vocabulary size is the number of unique words in the training corpus, and median frequency is the frequency of the word with the median frequency in the corpus.}
+\label{table:baseline}
+\end{table}
+
+\bigskip
+
+Mean BLEU scores for the manual segmentation method were generally fairly close to the baseline scores, as shown in Table 4. In fact, the mean is lower than the baseline for training sizes of 25,000, 50,000, and 200,000. The latter result appears particularly surprising given the trend of the score improving relative to the baseline -- this is further explored later in the discussion. The p-values suggest that only the model trained with 400,000 sentences is significantly (at the 5\% significance level) better than the baseline model. Reduction of vocabulary size was rather modest, ranging from 3.93\% for 25,000 sentences to 5.21\% with 800,000 sentences. Perhaps consequentially, the median frequencies were very similar to the baseline equivalent, with only the 400,000 sentences model resulting in an increase in frequency from two to three.
+
+\bigskip
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|c|c|c|c|c|c|}
+\hline
+Training Size & BLEU Mean & BLEU Var. & P-Value & Vocab. Size & Median Freq. \\ \hline
+25,000             & 28.291    & 0.132         & 0.935   & 23665           & 2                     \\
+50,000             & 32.244    & 0.144         & 0.830   & 31492           & 2                     \\
+100,000            & 37.126    & 0.170         & 0.392   & 41453           & 2                     \\
+200,000            & 37.649    & 0.177         & 1.000   & 54235           & 2                     \\
+400,000            & 42.186    & 0.198         & 0.003   & 71010           & 3                     \\
+800,000            & 44.945    & 0.292         & 0.125   & 93521           & 2                     \\ \hline
+\end{tabular}
+\caption{Results for the translation models trained using a French corpus pre-processed with the manual method. Columns are as described above in Table 3. P-values were calculated by comparing the bootstrap distributions of these models with the same sized baseline models with a null hypothesis that the baseline model is better than or equivalent to the new model and an alternative hypothesis that the new model is better in terms of BLEU score.}
+\label{tab:manual}
+\end{table}
+
+\bigskip
+
+Results for the byte-pair encoding (BPE) segmentation method were not too dissimilar. Translation models were generally fairly similar to the baseline, with the one exception being the one trained with 25,000 sentences. For this one, a highly significant p-value was achieved (0.007) for the mean BLEU increase of 0.64\%. The model trained on 400,000 sentences performed rather poorly compared to the baseline, but also had a much higher variance which perhaps suggests that it did not suit some of the sentences and the test set as much as some others. Most notably, the BPE method significantly reduced the vocabulary size with each iteration by a fairly standard 45\%. This is then echoed in the median word frequencies, where the frequencies are several time larger than those from the raw data. 
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|c|c|c|c|c|c|}
+\hline
+Training Size & BLEU Mean & BLEU Var. & P-Value & Vocab. Size & Median Freq. \\ \hline
+25,000        & 29.318    & 0.128     & 0.007   & 13356       & 9            \\
+50,000        & 32.231    & 0.148     & 0.855   & 17859       & 10           \\
+100,000       & 37.087    & 0.170     & 0.454   & 23627       & 11           \\
+200,000       & 39.721    & 0.171     & 0.430   & 31017       & 12           \\
+400,000       & 40.769    & 0.647     & 0.839   & 40729       & 13           \\
+800,000       & 44.490    & 0.194     & 0.767   & 53709       & 14           \\ \hline
+\end{tabular}
+\caption{Results for the translation models trained using a French corpus pre-processed with the BPE segmentation method. Columns are as described above in Table 4.}
+\label{tab:bpe}
+\end{table}
+
+The Morfessor method was fairly consistently better than the baseline in terms of mean BLEU score. Improvement ranged from 0.25\% to 1.07\%, but it was better for every size of the training corpus. This method was particularly impressive with the training size of 100,000 and 200,000 sentences, and this is reflected in the p-values of 0.000 and 0.038 respectively. It was also noticeably more consistent in terms of BLEU scores, with the variance never exceeding 0.2. This perhaps shows that Morfessor works fairly well on all sentences and does not have particularly strong or weak areas. The reduction in vocabulary size and increase in median word frequency was also very dramatic. The amount of words in the vocabulary was reduced by over 70\% for each iteration, while median word frequencies were vastly superior, particularly for the larger training corpora.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|c|c|c|c|c|c|}
+\hline
+Training Size & BLEU Mean & BLEU Var. & P-Value & Vocab. Size & Median Freq. \\ \hline
+25,000        & 29.080    & 0.136     & 0.064   & 6618        & 9            \\
+50,000        & 32.742    & 0.146     & 0.169   & 8433        & 11           \\
+100,000       & 38.125    & 0.170     & 0.000   & 10526       & 14           \\
+200,000       & 40.103    & 0.181     & 0.038   & 13014       & 17           \\
+400,000       & 41.768    & 0.194     & 0.131   & 16312       & 20           \\
+800,000       & 44.982    & 0.196     & 0.084   & 19696       & 26           \\ \hline
+\end{tabular}
+\caption{Results for the translation models trained using a French corpus pre-processed with the Morfessor segmentation method. Columns are as described above in Table 4.}
+\label{tab:morfessor}
+\end{table}
+
+\newpage
+
+\section{Discussion}
+
+\subsection{Analysis of Results}
+
+The most immediate and interesting result that can be drawn from the experiment is that each segmentation method performs the best for at least one training corpus size. This is easily visualised in the plot shown (below) in Figure 6. With 25,000 senteces, BPE is the method that maximises the BLEU score (p = 0.180 when compared with Morfessor -- the second best). Then for 50,000, 100,000 and 200,000 sentences, Morfessor performs the best, with p-values of 0.016, 0.000, and 0.065 respectively when compared with the second best models. The manual method is the best method with 400,000 sentences, achieving a p-value of 0.050 when compared to Morfessor. Finally, the manual method and Morfessor produce the two strongest models with 800,000 sentences used.
+
+\bigskip
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width = 13cm]{BLEU plot 2.png}
+    \caption{Scatter plot of the mean BLEU percentage scores (calculated from a bootstrap distribution) against the training corpus size (in sentences) on a $\log_2$ scale for each segmentation method. Scores for each segmentation method are joined by a line and represented by a colour each, as described by the legend. Plot was produced using \texttt{ggplot} \citep{ggplot} in R version 4.0.4 \citep{R}.}
+    \label{fig:bleu}
+\end{figure}
+
+Although not all these results are not significant at the 5\% significance level, what can be learned from this is that there is no single method that is superior overall. Each method has its niche and this is something that should be considered for anyone looking to optimise a machine translation system. It is also worth mentioning that the best method was never simply the baseline. This suggests that, over any size of training corpus, it is always worth applying some kind of pre-processing segmentation method to the training data as it will always improve the performance.
+
+\newpage
+
+The manual splitting method appears to be particularly powerful with large amounts of training data. With 400,000 sentences it was the best pre-processing method and with 800,000 sentences it was second to the Morfessor method by only 0.037\% in terms of mean BLEU score. One curious detail, however, was how poorly it performed with 200,000 sentences relative to the other techniques. With a fairly standard variance on this model it cannot even be explained by random variation. It is possible that the training corpus or the test set were just not well-suited to this method and that is what caused the anomalous result, but as discussed earlier, this seems unlikely given how large the corpora were. What seems more likely is that it has something to do with the vocabulary limit on the model. Only 50,000 unique word tokens were preserved by the model and this was the first model using this technique that passed this threshold (as can be seen in Figure 7). Perhaps the loss of some of the vocabulary negatively affected the model. The only way to know the reason for sure would be by further experimentation. If these results were reproduced with different corpora (but of the same size), then the idea that it was due to unfavourable data could be ruled out. Whatever the problem was, it was no longer a burden for the later models as it made up ground on the other models.
+
+\bigskip
+
+Considering the BPE method and the Morfessor methods both work in similar ways -- unsupervised techniques for word segmentation -- it is interesting to note the differences between them in terms of performance. BPE was better with 25,000 sentences (albeit only with a p-value of 0.180) but after that Morfessor was consistently the better method. This is perhaps down to the fact that Morfessor uses a more explicit training algorithm. With only 25,000 sentences it seems that Morfessor does not have enough training examples to correctly segment the data. In contrast, the BPE method maybe reaches the limit of its learning potential early on, and it is not particularly beneficial later on as its scores begin to drop away compared to the other methods.
+
+\bigskip
+
+As already mentioned, the one caveat to these results is that the BPE method may not have been working optimally. The hyperparameter of how many merges happen in the vocabulary was chosen as 0.575 multiplied by the size of the vocabulary, but this was chosen somewhat arbitrarily based on preliminary experimentation. What this means is that while BPE was the best for the model with 25,000 sentences, it may also be the best for certain other training sizes. Unfortunately, the only way to do this would be to systematically search over a wide range of hyperparameters for each training size iteration. Although this is perfectly possible, the computational limits to this study did not make this a practical option here. What can be inferred, however, is that more merges would potentially be beneficial. This is because the Morfessor method generally outperforms BPE while using a much smaller vocabulary, so perhaps that provides some direction for future research.
+
+\bigskip
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width = 13cm]{Vocabulary plot.png}
+    \caption{Scatter plot of the number of unique words (vocabulary size) in the training corpus against the training corpus size (in sentences) on a $\log_2$ scale for each pre-processing method. Sizes for each method are joined by a line and represented by a colour each, as described by the legend. The dashed line at 50,000 represents the limit to the number of words retained by the translation model that was used. Plot was produced using \texttt{ggplot} \citep{ggplot} in R version 4.0.4 \citep{R}.}
+    \label{fig:vocab}
+\end{figure}
+
+Looking at Figure 7, it appears that there is not much correlation between reducing the size of the vocabulary and BLEU score performance. Of course, as vocabulary size gets larger, so too does the BLEU score. But it appears there is more emphasis on how the vocabulary is reduced as opposed to what extent. For instance it can easily be seen that Morfessor reduces the vocabulary significantly from that of the baseline, but this is not completely reflected in its performance. Meanwhile, the manual method very modestly reduces vocabulary size, but is seen to outperform the other methods at certain points. What this points to is that large vocabularies are probably not such an issue. The median scores followed the exact same trend, suggesting it is probably not to do with the spread either, contrary to Gowda and May's \citeyearpar{gowda-may-2020-finding} findings. Rather, the goal of pre-processing is simply to reduce unseen words and perhaps enriching or reducing the size of the vocabulary are just symptomatic parts of this, as opposed to being the causes of the improvement.
+
+\subsection{Future Research}
+
+In terms of what work could be done to further the findings of this study, the first recommendation is to compare these methods using some different language pairs. French is not a particularly morphologically rich language -- although is still more so than English -- and was mostly chosen due to convenience. By studying the effects of segmentation on more morphologically complex languages such as German, Turkish or Finnish, more insight could be drawn on the relative effectiveness of each method and guidelines could be suggested based on this. For instance, perhaps the Morfessor or BPE is more effective with more complex languages, while rule-based manual methods are better suited to simpler languages. The more complex a language is, the more difficult it would be to produce an effective manual segmentation method (particularly at low cost), so this would also have to be considered.
+
+\bigskip
+
+Looking at more languages would also allow for more room for improvement with these methods. With the French\textendash English translation done in this study, scores of around 30\textendash50\% were achieved which is fairly close to the maximum that can be currently achieved by machine translation \citep{jean2015using}. For other more different language pairs (for example, English\textendash Chinese) the lower standard of score would allow for more insight to be made on how good the segmentation methods are due to the much larger room for improvement.
+
+\bigskip
+
+Another area for future research would be to build a more comprehensive manual splitting method. As previously discussed, the one used for this study was very basic and also caused certain errors like the one mentioned in section 3.2. A function that more accurately finds morphemes and over a wider range of search strings (the one used here only looked for eight) might be able to build on the promising results seen in this study. The obvious contradiction to this point is that the point of the manual method was that it was meant to be simple and easy to implement. Adding more options and more rules would of course make it more complex and more expensive if the help of linguistic experts was required. Adding further to this, the very point of the Morfessor algorithm is to find morphemes and separate them automatically, so there might be no point taking any manual method too far.
+
+\bigskip
+
+A lack of computational resources for this project meant that there was a limit to the number of models that could be built. In an ideal world, a finer grid would be used to look at the relationship between the BLEU score performance of each pre-processing method and the size of the training corpus. This might provide more insight into what is causing anomalous results such as the manual method's BLEU score at 200,000 sentences. Also, with a finer resolution of results, the domains where each method works best would be more clear and could be discussed with much greater confidence. Another way to do this would be to repeat experiments multiple times but re-sampling the training, validation, and test copora in between. As discussed previously, this would give more confidence that results are actually significant and not just anomalies caused by unusual or unrepresentative data.
+
+\bigskip
+
+A final area that could be explored is their effect with other models of machine translation. This study focused on the neural self-attention model (mainly due to computational limitations), but there is no reason it could not also be applied to a more traditional neural encoder-decoder model or even a model in statistical machine translation. The Creutz and Lagus \citeyearpar{creutz-lagus-2002-unsupervised} algorithm (Morfessor) was created with SMT in mind, and BPE was proposed using NMT methods. But looking at how they work in other algorithms could produce interesting results that were not discovered here due to the one-model approach used.
+
+\newpage
+
+\section{Conclusion}
+
+To summarise, the main findings of this study were that all three methods tested (manual, BPE, and Morfessor splitters) performed best in terms of BLEU score over a certain size of training corpus. With 25,000 sentences of training data, BPE was the strongest. The manual method was the best when 400,000 training sentences were used. Morfessor was the best method for all other sizes tested. At each training size iteration, at least one pre-processing method always outperformed the baseline. This leads to the recommendation that these methods should always be implemented (or at least considered) when building or training a new machine translation model. Creutz and Lagus' \citeyearpar{creutz-lagus-2002-unsupervised} method was the most impressive method and was by far the easiest to implement so should be the first port of call.
+
+\bigskip
+
+Returning to the point about improving the availability of high-quality machine translation models for minority languages (from the introduction) -- the results of this study look very promising. It is clear that it is distinctly possible to improve the quality of the existing MT framework without the need for vast amounts of data that are not currently available. Further research should be directed into implementation and fine-tuning of these methods for each specific language to best capitalise on their benefits.
+
+\bigskip
+
+Due to limitations to computation power, this study suffered from several limitations. Further experimentation and research is therefore recommended based on this. The main recommendation would be researching the effect of these methods on several different languages, rather than just French. But also, repetition of the experiment and re-sampling of the data would be beneficial to ensure that the results found were reliable and reproducible.
+
+\newpage
+
+\section{Bibliography}
+\bibliographystyle{agsm}
+\bibliography{refs}
+
+\newpage
+
+\appendix
+\section{Appendix -- Code}
+
+The code provided below is representative of the code that would be required to recreate the results of this dissertation. However, it is not completely comprehensive and does not include code that was used for development. Code would also require editing based on file names and locations for whatever machine it was being run on. Outputs are not shown to save space since 24 models were trained in total.
+
+\bigskip
+
+All code can also be found at https://github.com/acurtis869/MSc-Dissertation.
+
+\subsection{Data Preparation (Python)}
+
+\begin{lstlisting}[language=Python]
+# Import required packages
+import random
+import re
+import string
+import scipy.stats as ss
+import numpy as np
+
+## Define all the functions that are used to process the data
+
+# Create function to load documents
+# INPUT: directory of corpus
+# OUTPUT: string containing the corpus
+def load_doc(filename):
+  # open the file as read only
+  file = open(filename, mode='rt', encoding='utf-8')
+  # read all text
+  text = file.read()
+  # close the file
+  file.close()
+  return text
+
+# Then a function to split corpora into sentences
+# INPUT: corpus in the form of a string
+# OUTPUT: list of sentences (as strings)
+def to_sentences(doc):
+  return doc.strip().split('\n')
+  
+# Create function to clean data
+# INPUT: list of raw sentences
+# OUTPUT: list of cleaned sentences
+def clean_lines(lines):
+  # Create empty list to store cleaned lines
+  cleaned = list()
+  # Prepare regex for character filtering
+  re_print = re.compile('[^%s]' % re.escape(string.printable))
+  # Create translation table for removing punctuation unnecessary for grammar
+  table = str.maketrans(" ", " ", '"#$%&\()*+./:;?!,.<=>@[\\]^_`{|}~')
+  for line in lines:
+    # Add spaces between necessary punctuation
+    line = re.sub("-", " - ", line)
+    line = re.sub("'", " ' ", line)
+    line = re.sub("’", " ' ", line)
+    # Tokenise on white space
+    line = line.split()
+    # Remove remaining punctuation from each token
+    line = [word.translate(table) for word in line]
+    # Convert words to lower case
+    line = [word.lower() for word in line]
+    # Store as string
+    cleaned.append(' '.join(line))
+  return cleaned
+  
+  
+# Create a function to split data into training, validation and test sets
+# INPUTS: English corpus (in list form); Foreign corpus (in list form); n_train -- number of sentences in training corpus; n_val -- number of sentences in validation corpus; n_test -- number of sentences in test corpus; seed -- random seed for reproducibility
+# OUPUTS: English and foreign training, validation and test corpora (all in list form)
+def split_train_val_test(english, foreign, n_train, n_val, n_test, seed = 42):
+  # First check both corpora have same amount of sentences
+  if len(english) == len(foreign):
+    n = len(english)
+  else:
+    sys.exit("Corpora not of same length")
+  # Check required number of sentences does not exceed number available
+  if (n_train + n_val + n_test > n):
+    sys.exit("Number of sentences requested exceeds number available")
+  # Set seed for reproducibility
+  random.seed(seed)
+  # Create random index
+  index = random.sample(range(n), n)
+  # Create empty lists to store new corpora
+  english_train = []
+  foreign_train = []
+  # Add new sentences to corpora
+  for i in range(n_train):
+    english_train.append(english[index[i]])
+    foreign_train.append(foreign[index[i]])
+  # Repeat process above
+  english_val = []
+  foreign_val = []
+  for i in range(n_train, n_train + n_val):
+    english_val.append(english[index[i]])
+    foreign_val.append(foreign[index[i]])
+  # Repeat again
+  english_test = []
+  foreign_test = []
+  for i in range(n_train + n_val, n_train + n_val + n_test):
+    english_test.append(english[index[i]])
+    foreign_test.append(foreign[index[i]])
+  return english_train, foreign_train, english_val, 
+         foreign_val, english_test, foreign_test
+  
+# Create a function to save sentences
+# INPUTS: corpus in list form; directory of where to save corpus
+def save_sentences(sentences, filename):
+  # Create a file to write into
+  f = open(filename, "w")
+  # Write in sentences
+  for sent in sentences:
+    f.write(sent + "\n")
+  f.close()
+  
+## Define the functions that are used to analyse the corpora
+
+# Create function that creates vector of unique vocabulary
+# INPUT: corpus in list form
+# OUTPUT: list of all unique words in corpus
+def create_vocab(text):
+  # Create empty list to store vocabulary
+  vocab = []
+  # Search for words and add to list if they are not already in it
+  for line in text:
+    line = line.split()
+    for word in line:
+      if word not in vocab:
+        vocab.append(word)
+  return vocab
+
+# Create function to calculate frequencies and ranks
+# INPUTS: list of unique words in corpus; corpus in text form
+# OUTPUTS: list of frequencies of each word and their respective ranks (1 being the most frequent)
+def zipf(vocab, text):
+  n = len(vocab)
+  # Create n-dim list to store frequencies
+  freq = [0] * n
+  # Find occurences of each word and add to respective frequency
+  for line in text:
+    line = line.split()
+    for word in line:
+      freq[vocab.index(word)] += 1
+  # Calculate ranks
+  rank = ss.rankdata(freq)
+  # Adjust rank to correct format
+  for i in range(n):
+    rank[i] = len(rank) - rank[i] + 1
+  return freq, rank
+  
+# Create function to return the length of a vocabulary in a training set and the frequency of the pth percentile word
+# INPUTS: corpus in list form, percentile to output the frequency of
+# OUTPUTS: size -- the number of unique words in the vocabulary; F_p -- the frequency of the pth percentile word
+def corpus_details(corpus, p = 0.5):
+  vocab = create_vocab(corpus)
+  frequency, rank = zipf(vocab, corpus)
+  size = len(vocab)
+  # Find where pth percentile value is
+  index = np.where(rank == np.percentile(rank, p*100))[0][0]
+  # Find frequency at that index
+  F_p = frequency[index]
+  print("Size of the vocab is: " + str(size))
+  print("F_" + str(p) + " is: " + str(F_p))
+  return size, F_p
+  
+## Obtain datasets
+
+# Load in datasets:
+# English
+eng = load_doc('europarl-v7.fr-en.en')
+eng_sentences = to_sentences(eng)
+# French
+fre = load_doc('europarl-v7.fr-en.fr')
+fre_sentences = to_sentences(fre)
+
+# Clean datasets
+eng_sentences = clean_lines(eng_sentences)
+fre_sentences = clean_lines(fre_sentences)
+
+# Separate into train, validation and test for each training corpus size
+for training_size in [25000, 50000, 100000, 200000, 400000, 800000]:
+    eng_train, fre_train, eng_val, fre_val, eng_test, fre_test = split_train_val_test(eng_sentences, fre_sentences, training_size, 5000, 2000)
+    # These were then saved using save_sentences()
+
+## Manual Splitter
+
+# Function for method 1 -- manual splitter based on known French morphology
+# INPUT: French corpus in list form
+# OUTPUT: Processed French corpus in list form
+def french_morph(text):
+  # Create empty list to store new lines
+  out = []
+  for line in text:
+    # Add spaces around morphemes
+    line = re.sub("ez ", " ez ", line)
+    line = re.sub("ent ", " ent ", line)
+    line = re.sub("ons ", " ons ", line)
+    line = re.sub("ais ", " ais ", line)
+    line = re.sub("ait ", " ait ", line)
+    line = re.sub("i ons ", " ions ", line)
+    line = re.sub("i ez ", " iez ", line)
+    line = re.sub("ai ent ", " aient ", line)
+    # Add edited line to output list
+    out.append(line)
+  return out
+  
+# This was then applied to all the french corpora produced above like so:
+fre_train = to_sentences(load_doc({French training Corpus}))
+save_sentences(french_morph(fre_train))
+
+## BPE Splitter
+
+# Install package with function to do this from Sennrich et al. (2016)
+!pip install subword-nmt
+
+# Calculate how many splits are required
+round(0.575 * len(create_vocab(fre_train))
+
+# The splitting method then uses this number to create the splitting vocabulary
+!subword-nmt learn-bpe -s {num_operations} < {training_file} > {codes_file}
+
+# This was then applied to the three french corpora using the following line
+subword-nmt apply-bpe -c {codes_file} < {corpus_file} > {output_file}
+
+## Morfessor
+
+# Install and import morfessor to use algorithm from Creutz and Lagus (2002)
+!pip install morfessor
+import morfessor
+
+# Create function that trains Morfessor model and performs the segmentation on the data
+# INPUTS: the directory of the French training, validation and test corpora
+# OUTPUTS: the processed training, validation and test corpora all in list form
+def morfessor_splitter(train, val, test):
+  # Import Morfessor training model
+  io = morfessor.MorfessorIO()
+  # Import training data in reable format
+  train_data = list(io.read_corpus_file(train))
+  # Define model, selecting the one proposed by Creutz and Lagus (2002)
+  model = morfessor.BaselineModel()
+  # Load training data into model
+  model.load_data(train_data, count_modifier=lambda x: 1)
+  # Train model in batch
+  model.train_batch()
+  # Create empty list to store all output corpora
+  output_corpus = []
+  # Process corpora using trained Morfessor model
+  for corpus in [train, val, test]:
+    lines = to_sentences(load_doc(corpus))
+    out = []
+    for line in lines:
+      line = line.split()
+      # Create empty string to add processed words to
+      sentence = ''
+      # Add each processed word at a time
+      for word in line:
+        # Segment word
+        split_word = str(model.viterbi_segment(word)[0])[2:-2]
+        if split_word != word:
+        # Remove commas Morfessor automatically adds around splits
+          split_word = split_word.replace("'", "")
+          split_word = split_word.replace(",", "")
+        # Add processed word to the sentence
+        sentence += split_word + " "
+      out.append(sentence)
+    output_corpus.append(out)
+  return output_corpus[0], output_corpus[1], output_corpus[2]
+
+# This was then applied to all the french corpora produced above like so:
+fre_train, fre_val, fre_test = morfessor_splitter({French training corpus}, {French validation corpus}, {French test corpus})
+# These could then be saved using save_sentences()
+\end{lstlisting}
+
+\subsection{Obtaining Results (Python)}
+
+\begin{lstlisting}[language=Python]
+# Find length of vocab and median word frequency
+corpus_details(fre_train)
+
+# Install OpenNMT to remote machine
+!pip install OpenNMT-tf[tensorflow]
+
+# The following process was then followed for each set of corpora (25k to 800k training sizes; baseline, manual, bpe, and morfessor)
+
+# Build vocabularies
+!onmt-build-vocab --size 50000 --save_vocab {French vocab output file} {French training corpus}
+!onmt-build-vocab --size 50000 --save_vocab {English vocab output file} {English training corpus}
+
+# Train model
+!onmt-main --model_type Transformer --config {YAML configuration file} --auto_config train --with_eval
+
+# Where the YAML configuration file takes the form:
+\end{lstlisting}
+\begin{verbatim}
+---
+model_dir: run/
+
+data:
+  train_features_file: {French training corpus}
+  train_labels_file: {English training corpus}
+  eval_features_file: {French validation corpus}
+  eval_labels_file: {English validation corpus}
+  source_vocabulary: {French vocabulary file}
+  target_vocabulary: {English vocabulary file}
+
+eval:
+  save_eval_predictions: true
+  steps: 1000
+  early_stopping:
+    metric: perplexity
+    min_improvement: 0.5
+    steps: 3
+
+train:
+  save_checkpoints_steps: 1000
+  average_last_checkpoints: 3
+---
+\end{verbatim}
+\begin{lstlisting}[language=Python]
+
+# Translate the test set
+!onmt-main --config {YAML configuration file} --auto_config infer --features_file {French test corpus} --predictions_file {English predictions output file}
+
+# Create function to create bootstrap distribution of BLEU test scores
+# INPUTS: n_samples -- number of bootstrap samples to be taken; prediction -- the predictions made from the translation model in list form; target -- the reference test set in English in list form; sample_size -- the size of each individual bootstrap sample; seed -- random seed for reproducibility
+# OUTPUT: list of n_samples bootstrapped BLEU scores
+
+import sacrebleu
+
+def bootstrap_test(n_samples, prediction, target, sample_size, seed = 42):
+  # Create empty list to store BLEU scores
+  bleu_vec = []
+  # Set seed for reproducibility
+  random.seed(seed)
+  # Make a temporary folder to store sampled corpora
+  !mkdir bootstrap
+  for i in range(n_samples):
+    # Sample sentences randomly from the reference and predictions files
+    index = random.choices(range(len(target)), k = sample_size)
+    target_sample = []
+    prediction_sample = []
+    for j in range(len(index)):
+      target_sample.append(target[index[j]])
+      prediction_sample.append(prediction[index[j]])
+    # Save sentences in temporary folder created earlier  
+    save_clean_sentences(prediction_sample, "bootstrap/sys")
+    save_clean_sentences(target_sample, "bootstrap/ref")
+    # Load documents (this had to be done to ensure correct format for SacreBLEU)
+    sys = load_doc("bootstrap/sys")
+    ref = load_doc("bootstrap/ref")
+    # Calculate BLEU score
+    bleu = sacrebleu.corpus_bleu(sys, ref)
+    # Add BLEU score to list created at the start
+    bleu_vec.append(bleu.score)
+  return bleu_vec
+
+# Calculate bootstrap distribution using function above
+preds = to_sentences(load_doc("{English predictions file}"))
+tgt = to_sentences(load_doc("{English test corpus}"))
+
+bootstrap_test(1000, preds, tgt, 2000)
+
+# The resulting vector was then saved using JSON
+\end{lstlisting}
+
+\subsection{Analysis (R)}
+
+The following code was used to analyse the data. The data taken from the model was in the form of saved JSON files containing the bootstrapped BLEU scores, along with each corpus' vocabulary size and median word frequency.
+
+\begin{lstlisting}[language=R]
+
+# Read in JSON files
+
+library(rjson)
+
+control_bleu_25k <- fromJSON(file = "~/25k/Control/control_bleu.json")
+manual_bleu_25k <- fromJSON(file = "~/25k/Manual/manual_bleu.json")
+bpe_bleu_25k <- fromJSON(file = "~/25k/BPE/bpe_bleu.json")
+morfessor_bleu_25k <- fromJSON(file = "~/25k/Morfessor/morfessor_bleu.json")
+control_bleu_50k <- fromJSON(file = "~/50k/Control/control_bleu.json")
+manual_bleu_50k <- fromJSON(file = "~/50k/Manual/manual_bleu.json")
+bpe_bleu_50k <- fromJSON(file = "~/50k/BPE/bpe_bleu.json")
+morfessor_bleu_50k <- fromJSON(file = "~/50k/Morfessor/morfessor_bleu.json")
+control_bleu_100k <- fromJSON(file = "~/100k/Control/control_bleu.json")
+manual_bleu_100k <- fromJSON(file = "~/100k/Manual/manual_bleu.json")
+bpe_bleu_100k <- fromJSON(file = "~/100k/BPE/bpe_bleu.json")
+morfessor_bleu_100k <- fromJSON(file = "~/100k/Morfessor/morfessor_bleu.json")
+control_bleu_200k <- fromJSON(file = "~/200k/Control/control_bleu.json")
+manual_bleu_200k <- fromJSON(file = "~/200k/Manual/manual_bleu.json")
+bpe_bleu_200k <- fromJSON(file = "~/200k/BPE/bpe_bleu.json")
+morfessor_bleu_200k <- fromJSON(file = "~/200k/Morfessor/morfessor_bleu.json")
+control_bleu_400k <- fromJSON(file = "~/400k/Control/control_bleu.json")
+manual_bleu_400k <- fromJSON(file = "~/400k/Manual/manual_bleu.json")
+bpe_bleu_400k <- fromJSON(file = "~/400k/BPE/bpe_bleu.json")
+morfessor_bleu_400k <- fromJSON(file = "~/400k/Morfessor/morfessor_bleu.json")
+control_bleu_800k <- fromJSON(file = "~/800k/Control/control_bleu.json")
+manual_bleu_800k <- fromJSON(file = "~/800k/Manual/manual_bleu.json")
+bpe_bleu_800k <- fromJSON(file = "~/800k/BPE/bpe_bleu.json")
+morfessor_bleu_800k <- fromJSON(file = "~/800k/Morfessor/morfessor_bleu.json")
+
+# Note: `~' was replaced by the specific directory on my machine.
+
+# Create function to calculate p-value
+# INPUTS: H_0: base and new models are as good as each other
+#         H_1: new model is better than base model
+# base and new are both vectors that should have the same length
+# OUPUT: p-value for above test
+bootstrap_test <- function(base, new) {
+  # Check vectors are correct length
+  if (length(base) == length(new)) {
+    n <- length(base)
+  }
+  else {
+    errorCondition("vectors are of different lengths")
+  }
+  # Return bootstrap p-value
+  return(1 - sum(new > base) / n)
+}
+
+# Create database to store results
+
+df = data.frame("Training Size" = rep(c(25000, 
+                                        50000,
+                                        100000, 
+                                        200000, 
+                                        400000, 
+                                        800000), 4),
+                "Segmentation" = c(rep("Baseline", 6), rep("Manual", 6), 
+                                   rep("BPE", 6), rep("Morfessor", 6)),
+                "Mean BLEU" = c(mean(control_bleu_25k), mean(control_bleu_50k),
+                                mean(control_bleu_100k), mean(control_bleu_200k),
+                                mean(control_bleu_400k), mean(control_bleu_800k),
+                                mean(manual_bleu_25k), mean(manual_bleu_50k), 
+                                mean(manual_bleu_100k), mean(manual_bleu_200k),
+                                mean(manual_bleu_400k), mean(manual_bleu_800k),
+                                mean(bpe_bleu_25k), mean(bpe_bleu_50k),
+                                mean(bpe_bleu_100k), mean(bpe_bleu_200k),
+                                mean(bpe_bleu_400k), mean(bpe_bleu_800k),
+                                mean(morfessor_bleu_25k), mean(morfessor_bleu_50k), 
+                                mean(morfessor_bleu_100k), mean(morfessor_bleu_200k),
+                                mean(morfessor_bleu_400k), mean(morfessor_bleu_800k)),
+                "BLEU Var" = c(var(control_bleu_25k), var(control_bleu_50k),
+                               var(control_bleu_100k), var(control_bleu_200k),
+                               var(control_bleu_400k), var(control_bleu_800k),
+                               var(manual_bleu_25k), var(manual_bleu_50k), 
+                               var(manual_bleu_100k), var(manual_bleu_200k),
+                               var(manual_bleu_400k), var(manual_bleu_800k),
+                               var(bpe_bleu_25k), var(bpe_bleu_50k),
+                               var(bpe_bleu_100k), var(bpe_bleu_200k),
+                               var(bpe_bleu_400k), var(bpe_bleu_800k),
+                               var(morfessor_bleu_25k), var(morfessor_bleu_50k), 
+                               var(morfessor_bleu_100k), var(morfessor_bleu_200k),
+                               var(morfessor_bleu_400k), var(morfessor_bleu_800k)),
+                "PVal" = c(rep(1, 6), 
+                           bootstrap_test(control_bleu_25k, manual_bleu_25k),
+                           bootstrap_test(control_bleu_50k, manual_bleu_50k),
+                           bootstrap_test(control_bleu_100k, manual_bleu_100k),
+                           bootstrap_test(control_bleu_200k, manual_bleu_200k),
+                           bootstrap_test(control_bleu_400k, manual_bleu_400k),
+                           bootstrap_test(control_bleu_800k, manual_bleu_800k),
+                           bootstrap_test(control_bleu_25k, bpe_bleu_25k),
+                           bootstrap_test(control_bleu_50k, bpe_bleu_50k),
+                           bootstrap_test(control_bleu_100k, bpe_bleu_100k),
+                           bootstrap_test(control_bleu_200k, bpe_bleu_200k),
+                           bootstrap_test(control_bleu_400k, bpe_bleu_400k),
+                           bootstrap_test(control_bleu_800k, bpe_bleu_800k),
+                           bootstrap_test(control_bleu_25k, morfessor_bleu_25k),
+                           bootstrap_test(control_bleu_50k, morfessor_bleu_50k),
+                           bootstrap_test(control_bleu_100k, morfessor_bleu_100k),
+                           bootstrap_test(control_bleu_200k, morfessor_bleu_200k),
+                           bootstrap_test(control_bleu_400k, morfessor_bleu_400k),
+                           bootstrap_test(control_bleu_800k, morfessor_bleu_800k)),
+                "Vocab Size" = c(24633, 32952, 43547, 57088, 74913, 98626, 
+                                 23665, 31492, 41453, 54235, 71010, 93521, 
+                                 13356, 17859, 23627, 31017, 40729, 53709,
+                                 6618, 8433, 10526, 13014, 16312, 19696),
+                "Median Freq" = c(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 9, 10, 
+                                  11, 12, 13, 14, 9, 11, 14, 17, 20, 26))
+                                  
+# Add a column for vocab reduction
+df$PercentReduction <- 100 * 
+  (rep(df$Vocab.Size[df$Segmentation == "Baseline"], 4) - df$Vocab.Size) / 
+  rep(df$Vocab.Size[df$Segmentation == "Baseline"], 4)
+  
+# This resulted in Table 7 (shown in Appendix B)
+
+# This table was analysed using Figures 6 and 7 which were created with the following code
+
+# Import tidyverse to use ggplot
+library(tidyverse)
+
+# Figure 6
+ggplot(df, aes(x = Training.Size, y = Mean.BLEU, col = Segmentation,
+                        group = Segmentation)) + geom_point() + geom_line() +
+  scale_x_continuous(breaks = c(25000, 50000, 100000, 200000, 400000, 800000),
+                     labels = c("25k", "50k", "100k", "200k", "400k", "800k"),
+                     trans = "log2") + 
+  xlab("Training Corpus Size (Sentences)") +
+  ylab("Mean BLEU Score (%)") +
+  labs(color = "Segmentation Method:") +
+  theme(text = element_text(size=15), legend.position="bottom")
+  
+# Figure 7
+ggplot(df, aes(x = Training.Size, y = Vocab.Size, col = Segmentation,
+               group = Segmentation)) + 
+  geom_point() + geom_line() +
+  scale_x_continuous(breaks = c(25000, 50000, 100000, 200000, 400000, 800000),
+                     labels = c("25k", "50k", "100k", "200k", "400k", "800k"),
+                     trans = "log2") +
+  xlab("Training Corpus Size (Sentences)") +
+  ylab("Vocabulary Size") +
+  labs(color = "Segmentation Method:") +
+  theme(text = element_text(size=15), legend.position="bottom") + 
+  geom_hline(yintercept=50000, linetype='longdash', col = 'black')
+
+\end{lstlisting}
+
+
+
+
+\section{Appendix -- Results}
+
+\begin{sidewaystable}
+\centering
+\begin{tabular}{|c|c|c|c|c|c|c|c|}
+\hline
+Training.Size & Segmentation & Mean.BLEU & BLEU.Var  & PVal  & Vocab.Size & Median.Freq & PercentReduction \\ \hline
+25000         & Baseline     & 28.67931  & 0.1362427 & 1.000 & 24633       & 2           & 0.000000         \\
+50000         & Baseline     & 32.49338  & 0.1447825 & 1.000 & 32952       & 2           & 0.000000         \\
+100000        & Baseline     & 37.05042  & 0.1636165 & 1.000 & 43547       & 2           & 0.000000         \\
+200000        & Baseline     & 39.66440  & 0.1838489 & 1.000 & 57088       & 2           & 0.000000         \\
+400000        & Baseline     & 41.49371  & 0.1855109 & 1.000 & 74913       & 2           & 0.000000         \\
+800000        & Baseline     & 44.65093  & 0.1970252 & 1.000 & 98626       & 2           & 0.000000         \\
+25000         & Manual       & 28.29054  & 0.1324886 & 0.935 & 23665       & 2           & 3.929688         \\
+50000         & Manual       & 32.24423  & 0.1443682 & 0.830 & 31492       & 2           & 4.430687         \\
+100000        & Manual       & 37.12606  & 0.1703154 & 0.392 & 41453       & 2           & 4.808598         \\
+200000        & Manual       & 37.64914  & 0.1771907 & 1.000 & 54235       & 2           & 4.997548         \\
+400000        & Manual       & 42.18559  & 0.1978415 & 0.003 & 71010       & 3           & 5.210044         \\
+800000        & Manual       & 44.94526  & 0.2921536 & 0.125 & 93521       & 2           & 5.176120         \\
+25000         & BPE          & 29.31834  & 0.1281994 & 0.007 & 13356       & 9           & 45.780051        \\
+50000         & BPE          & 32.23095  & 0.1483379 & 0.855 & 17859       & 10          & 45.802986        \\
+100000        & BPE          & 37.08694  & 0.1698958 & 0.454 & 23627       & 11          & 45.743679        \\
+200000        & BPE          & 39.72109  & 0.1714484 & 0.430 & 31017       & 12          & 45.668091        \\
+400000        & BPE          & 40.76880  & 0.6475174 & 0.839 & 40729       & 13          & 45.631599        \\
+800000        & BPE          & 44.48954  & 0.1943818 & 0.767 & 53709       & 14          & 45.542757        \\
+25000         & Morfessor    & 29.08025  & 0.1362161 & 0.064 & 6618        & 9           & 73.133601        \\
+50000         & Morfessor    & 32.74220  & 0.1462669 & 0.169 & 8433        & 11          & 74.408230        \\
+100000        & Morfessor    & 38.12500  & 0.1700937 & 0.000 & 10526       & 14          & 75.828415        \\
+200000        & Morfessor    & 40.10274  & 0.1807097 & 0.038 & 13014       & 17          & 77.203615        \\
+400000        & Morfessor    & 41.76770  & 0.1937056 & 0.131 & 16312       & 20          & 78.225408        \\
+800000        & Morfessor    & 44.98179  & 0.1962439 & 0.084 & 19696       & 26          & 80.029607        \\ \hline
+\end{tabular}
+\label{tab:raw}
+\caption{Raw results used for the analysis.}
+\end{sidewaystable}
+
+\end{document}
